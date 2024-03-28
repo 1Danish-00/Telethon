@@ -204,7 +204,24 @@ class _MessagesIter(RequestIter):
             message._finish_init(self.client, entities, self.entity)
             self.buffer.append(message)
 
-        if len(r.messages) < self.request.limit:
+        # Not a slice (using offset would return the same, with e.g. SearchGlobal).
+        if isinstance(r, types.messages.Messages):
+            return True
+
+        # Some channels are "buggy" and may return less messages than
+        # requested (apparently, the messages excluded are, for example,
+        # "not displayable due to local laws").
+        #
+        # This means it's not safe to rely on `len(r.messages) < req.limit` as
+        # the stop condition. Unfortunately more requests must be made.
+        #
+        # However we can still check if the highest ID is equal to or lower
+        # than the limit, in which case there won't be any more messages
+        # because the lowest message ID is 1.
+        #
+        # We also assume the API will always return, at least, one message if
+        # there is more to fetch.
+        if not r.messages or r.messages[0].id <= self.request.limit:
             return True
 
         # Get the last message that's not empty (in some rare cases
@@ -600,7 +617,7 @@ class MessageMethods:
             peer=entity,
             msg_id=utils.get_message_id(message)
         ))
-        m = r.messages[0]
+        m = min(r.messages, key=lambda msg: msg.id)
         chat = next(c for c in r.chats if c.id == m.peer_id.channel_id)
         return utils.get_input_peer(chat), m.id
 
@@ -618,12 +635,13 @@ class MessageMethods:
             thumb: 'hints.FileLike' = None,
             force_document: bool = False,
             clear_draft: bool = False,
-            buttons: 'hints.MarkupLike' = None,
+            buttons: typing.Optional['hints.MarkupLike'] = None,
             silent: bool = None,
             background: bool = None,
             supports_streaming: bool = False,
             schedule: 'hints.DateLike' = None,
-            comment_to: 'typing.Union[int, types.Message]' = None
+            comment_to: 'typing.Union[int, types.Message]' = None,
+            nosound_video: bool = None,
     ) -> 'types.Message':
         """
         Sends a message to the specified user, chat or channel.
@@ -737,6 +755,15 @@ class MessageMethods:
                 This parameter takes precedence over ``reply_to``. If there is
                 no linked chat, `telethon.errors.sgIdInvalidError` is raised.
 
+            nosound_video (`bool`, optional):
+                Only applicable when sending a video file without an audio
+                track. If set to ``True``, the video will be displayed in
+                Telegram as a video. If set to ``False``, Telegram will attempt
+                to display the video as an animated gif. (It may still display
+                as a video due to other factors.) The value is ignored if set
+                on non-video files. This is set to ``True`` for albums, as gifs
+                cannot be sent in albums.
+
         Returns
             The sent `custom.Message <telethon.tl.custom.message.Message>`.
 
@@ -804,12 +831,15 @@ class MessageMethods:
                 buttons=buttons, clear_draft=clear_draft, silent=silent,
                 schedule=schedule, supports_streaming=supports_streaming,
                 formatting_entities=formatting_entities,
-                comment_to=comment_to, background=background
+                comment_to=comment_to, background=background,
+                nosound_video=nosound_video,
             )
 
         entity = await self.get_input_entity(entity)
         if comment_to is not None:
             entity, reply_to = await self._get_comment_data(entity, comment_to)
+        else:
+            reply_to = utils.get_message_id(reply_to)
 
         if isinstance(message, types.Message):
             if buttons is None:
@@ -831,6 +861,7 @@ class MessageMethods:
                     reply_to=reply_to,
                     buttons=markup,
                     formatting_entities=message.entities,
+                    parse_mode=None,  # explicitly disable parse_mode to force using even empty formatting_entities
                     schedule=schedule
                 )
 
@@ -839,7 +870,7 @@ class MessageMethods:
                 message=message.message or '',
                 silent=silent,
                 background=background,
-                reply_to_msg_id=utils.get_message_id(reply_to),
+                reply_to=None if reply_to is None else types.InputReplyToMessage(reply_to),
                 reply_markup=markup,
                 entities=message.entities,
                 clear_draft=clear_draft,
@@ -861,7 +892,7 @@ class MessageMethods:
                 message=message,
                 entities=formatting_entities,
                 no_webpage=not link_preview,
-                reply_to_msg_id=utils.get_message_id(reply_to),
+                reply_to=None if reply_to is None else types.InputReplyToMessage(reply_to),
                 clear_draft=clear_draft,
                 silent=silent,
                 background=background,
@@ -880,7 +911,8 @@ class MessageMethods:
                 media=result.media,
                 entities=result.entities,
                 reply_markup=request.reply_markup,
-                ttl_period=result.ttl_period
+                ttl_period=result.ttl_period,
+                reply_to=request.reply_to
             )
             message._finish_init(self, {}, entity)
             return message
@@ -897,7 +929,8 @@ class MessageMethods:
             with_my_score: bool = None,
             silent: bool = None,
             as_album: bool = None,
-            schedule: 'hints.DateLike' = None
+            schedule: 'hints.DateLike' = None,
+            drop_author: bool = None,
     ) -> 'typing.Sequence[types.Message]':
         """
         Forwards the given messages to the specified entity.
@@ -999,7 +1032,7 @@ class MessageMethods:
             if isinstance(chunk[0], int):
                 chat = from_peer
             else:
-                chat = await chunk[0].get_input_chat()
+                chat = from_peer or await self.get_input_entity(chunk[0].peer_id)
                 chunk = [m.id for m in chunk]
 
             req = functions.messages.ForwardMessagesRequest(
@@ -1009,7 +1042,8 @@ class MessageMethods:
                 silent=silent,
                 background=background,
                 with_my_score=with_my_score,
-                schedule_date=schedule
+                schedule_date=schedule,
+                drop_author=drop_author
             )
             result = await self(req)
             sent.extend(self._get_response_message(req, result, entity))
@@ -1029,7 +1063,7 @@ class MessageMethods:
             file: 'hints.FileLike' = None,
             thumb: 'hints.FileLike' = None,
             force_document: bool = False,
-            buttons: 'hints.MarkupLike' = None,
+            buttons: typing.Optional['hints.MarkupLike'] = None,
             supports_streaming: bool = False,
             schedule: 'hints.DateLike' = None
     ) -> 'types.Message':
@@ -1045,7 +1079,7 @@ class MessageMethods:
                 from it, so the next parameter will be assumed to be the
                 message text.
 
-                You may also pass a :tl:`InputBotInlineMessageID`,
+                You may also pass a :tl:`InputBotInlineMessageID` or :tl:`InputBotInlineMessageID64`,
                 which is the only way to edit messages that were sent
                 after the user selects an inline query result.
 
@@ -1117,7 +1151,7 @@ class MessageMethods:
 
         Returns
             The edited `Message <telethon.tl.custom.message.Message>`,
-            unless `entity` was a :tl:`InputBotInlineMessageID` in which
+            unless `entity` was a :tl:`InputBotInlineMessageID` or :tl:`InputBotInlineMessageID64` in which
             case this method returns a boolean.
 
         Raises
@@ -1143,7 +1177,7 @@ class MessageMethods:
                 # or
                 await client.edit_message(message, 'hello!!!')
         """
-        if isinstance(entity, types.InputBotInlineMessageID):
+        if isinstance(entity, (types.InputBotInlineMessageID, types.InputBotInlineMessageID64)):
             text = text or message
             message = entity
         elif isinstance(entity, types.Message):
@@ -1159,7 +1193,7 @@ class MessageMethods:
                 attributes=attributes,
                 force_document=force_document)
 
-        if isinstance(entity, types.InputBotInlineMessageID):
+        if isinstance(entity, (types.InputBotInlineMessageID, types.InputBotInlineMessageID64)):
             request = functions.messages.EditInlineBotMessageRequest(
                 id=entity,
                 message=text,
@@ -1277,7 +1311,8 @@ class MessageMethods:
             message: 'typing.Union[hints.MessageIDLike, typing.Sequence[hints.MessageIDLike]]' = None,
             *,
             max_id: int = None,
-            clear_mentions: bool = False) -> bool:
+            clear_mentions: bool = False,
+            clear_reactions: bool = False) -> bool:
         """
         Marks messages as read and optionally clears mentions.
 
@@ -1311,6 +1346,13 @@ class MessageMethods:
                 If no message is provided, this will be the only action
                 taken.
 
+            clear_reactions (`bool`):
+                Whether the reactions badge should be cleared (so that
+                there are no more reaction notifications) or not for the given entity.
+
+                If no message is provided, this will be the only action
+                taken.
+
         Example
             .. code-block:: python
 
@@ -1333,6 +1375,10 @@ class MessageMethods:
         entity = await self.get_input_entity(entity)
         if clear_mentions:
             await self(functions.messages.ReadMentionsRequest(entity))
+            if max_id is None and not clear_reactions:
+                return True
+        if clear_reactions:
+            await self(functions.messages.ReadReactionsRequest(entity))
             if max_id is None:
                 return True
 

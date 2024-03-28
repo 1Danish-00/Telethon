@@ -12,6 +12,8 @@ as a user or through a bot account (bot API alternative).
 
     If you have code using Telethon before its 1.0 version, you must
     read `Compatibility and Convenience`_ to learn how to migrate.
+    As with any third-party library for Telegram, be careful not to
+    break `Telegram's ToS`_ or `Telegram can ban the account`_.
 
 What is this?
 -------------
@@ -75,7 +77,9 @@ useful information.
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
 .. _MTProto: https://core.telegram.org/mtproto
 .. _Telegram: https://telegram.org
-.. _Compatibility and Convenience: https://docs.telethon.dev/en/latest/misc/compatibility-and-convenience.html
+.. _Compatibility and Convenience: https://docs.telethon.dev/en/stable/misc/compatibility-and-convenience.html
+.. _Telegram's ToS: https://core.telegram.org/api/terms
+.. _Telegram can ban the account: https://docs.telethon.dev/en/stable/quick-references/faq.html#my-account-was-deleted-limited-when-using-the-library
 .. _Read The Docs: https://docs.telethon.dev
 
 .. |logo| image:: logo.svg

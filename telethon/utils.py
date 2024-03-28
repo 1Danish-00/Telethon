@@ -4,7 +4,6 @@ to convert between an entity like a User, Chat, etc. into its Input version)
 """
 import base64
 import binascii
-import imghdr
 import inspect
 import io
 import itertools
@@ -54,20 +53,14 @@ mimetypes.add_type('audio/flac', '.flac')
 mimetypes.add_type('application/x-tgsticker', '.tgs')
 
 USERNAME_RE = re.compile(
-    r'@|(?:https?://)?(?:www\.)?(?:telegram\.(?:me|dog)|t\.me)/(@|joinchat/)?'
+    r'@|(?:https?://)?(?:www\.)?(?:telegram\.(?:me|dog)|t\.me)/(@|\+|joinchat/)?'
 )
 TG_JOIN_RE = re.compile(
     r'tg://(join)\?invite='
 )
 
-# The only shorter-than-five-characters usernames are those used for some
-# special, very well known bots. This list may be incomplete though:
-#    "[...] @gif, @vid, @pic, @bing, @wiki, @imdb and @bold [...]"
-#
-# See https://telegram.org/blog/inline-bots#how-does-it-work
 VALID_USERNAME_RE = re.compile(
-    r'^([a-z](?:(?!__)\w){3,30}[a-z\d]'
-    r'|gif|vid|pic|bing|wiki|imdb|bold|vote|like|coub)$',
+    r'^[a-z](?:(?!__)\w){1,30}[a-z\d]$',
     re.IGNORECASE
 )
 
@@ -583,11 +576,14 @@ def _get_entity_pair(entity_id, entities, cache,
     """
     Returns ``(entity, input_entity)`` for the given entity ID.
     """
+    if not entity_id:
+        return None, None
+
     entity = entities.get(entity_id)
     try:
-        input_entity = cache[entity_id]
-    except KeyError:
-        # KeyError is unlikely, so another TypeError won't hurt
+        input_entity = cache.get(resolve_id(entity_id)[0])._as_input_peer()
+    except AttributeError:
+        # AttributeError is unlikely, so another TypeError won't hurt
         try:
             input_entity = get_input_peer(entity)
         except TypeError:
@@ -760,7 +756,10 @@ def sanitize_parse_mode(mode):
     if not mode:
         return None
 
-    if callable(mode):
+    if (all(hasattr(mode, x) for x in ('parse', 'unparse'))
+          and all(callable(x) for x in (mode.parse, mode.unparse))):
+        return mode
+    elif callable(mode):
         class CustomMode:
             @staticmethod
             def unparse(text, entities):
@@ -768,9 +767,6 @@ def sanitize_parse_mode(mode):
 
         CustomMode.parse = mode
         return CustomMode
-    elif (all(hasattr(mode, x) for x in ('parse', 'unparse'))
-          and all(callable(x) for x in (mode.parse, mode.unparse))):
-        return mode
     elif isinstance(mode, str):
         try:
             return {
@@ -838,12 +834,6 @@ def _get_extension(file):
         return os.path.splitext(file)[-1]
     elif isinstance(file, pathlib.Path):
         return file.suffix
-    elif isinstance(file, bytes):
-        kind = imghdr.what(io.BytesIO(file))
-        return ('.' + kind) if kind else ''
-    elif isinstance(file, io.IOBase) and not isinstance(file, io.TextIOBase) and file.seekable():
-        kind = imghdr.what(file)
-        return ('.' + kind) if kind is not None else ''
     elif getattr(file, 'name', None):
         # Note: ``file.name`` works for :tl:`InputFile` and some `IOBase`
         return _get_extension(file.name)
@@ -1341,10 +1331,7 @@ def get_appropriated_part_size(file_size):
         return 128
     if file_size <= 786432000:  # 750MB
         return 256
-    if file_size <= 2097152000:  # 2000MB
-        return 512
-
-    raise ValueError('File size too large')
+    return 512
 
 
 def encode_waveform(waveform):

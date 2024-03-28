@@ -1,11 +1,11 @@
 import datetime
 
-from .. import TLObject
+from .. import TLObject, types
 from ..functions.messages import SaveDraftRequest
 from ..types import DraftMessage
 from ...errors import RPCError
 from ...extensions import markdown
-from ...utils import get_input_peer, get_peer
+from ...utils import get_input_peer, get_peer, get_peer_id
 
 
 class Draft:
@@ -37,7 +37,7 @@ class Draft:
         self._raw_text = draft.message
         self.date = draft.date
         self.link_preview = not draft.no_webpage
-        self.reply_to_msg_id = draft.reply_to_msg_id
+        self.reply_to_msg_id = draft.reply_to.reply_to_msg_id if isinstance(draft.reply_to, types.InputReplyToMessage) else None
 
     @property
     def entity(self):
@@ -53,8 +53,9 @@ class Draft:
         """
         if not self._input_entity:
             try:
-                self._input_entity = self._client._entity_cache[self._peer]
-            except KeyError:
+                self._input_entity = self._client._mb_entity_cache.get(
+                        get_peer_id(self._peer, add_mark=False))._as_input_peer()
+            except AttributeError:
                 pass
 
         return self._input_entity
@@ -138,7 +139,7 @@ class Draft:
             peer=self._peer,
             message=raw_text,
             no_webpage=not link_preview,
-            reply_to_msg_id=reply_to,
+            reply_to=None if reply_to is None else types.InputReplyToMessage(reply_to),
             entities=entities
         ))
 

@@ -77,6 +77,9 @@ class MemorySession(Session):
     def set_update_state(self, entity_id, state):
         self._update_states[entity_id] = state
 
+    def get_update_states(self):
+        return self._update_states.items()
+
     def close(self):
         pass
 
@@ -171,7 +174,7 @@ class MemorySession(Session):
     def get_entity_rows_by_id(self, id, exact=True):
         try:
             if exact:
-                return next((id, hash) for found_id, hash, _, _, _
+                return next((found_id, hash) for found_id, hash, _, _, _
                             in self._entities if found_id == id)
             else:
                 ids = (
@@ -179,7 +182,7 @@ class MemorySession(Session):
                     utils.get_peer_id(PeerChat(id)),
                     utils.get_peer_id(PeerChannel(id))
                 )
-                return next((id, hash) for found_id, hash, _, _, _
+                return next((found_id, hash) for found_id, hash, _, _, _
                             in self._entities if found_id in ids)
         except StopIteration:
             pass

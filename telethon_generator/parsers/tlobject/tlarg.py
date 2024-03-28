@@ -96,13 +96,18 @@ class TLArg:
         :param generic_definition: Is the argument a generic definition?
                                    (i.e. {X:Type})
         """
-        self.name = 'is_self' if name == 'self' else name
+        if name == 'self':
+            self.name = 'is_self'
+        elif name == 'from':
+            self.name = 'from_'
+        else:
+            self.name = name
 
         # Default values
         self.is_vector = False
-        self.is_flag = False
+        self.flag = None  # name of the flag to check if self is present
         self.skip_constructor_id = False
-        self.flag_index = -1
+        self.flag_index = -1  # bit index of the flag to check if self is present
         self.cls = None
 
         # Special case: some types can be inferred, which makes it
@@ -122,16 +127,14 @@ class TLArg:
             # Strip the exclamation mark always to have only the name
             self.type = arg_type.lstrip('!')
 
-            # The type may be a flag (flags.IDX?REAL_TYPE)
-            # Note that 'flags' is NOT the flags name; this
-            # is determined by a previous argument
-            # However, we assume that the argument will always be called 'flags'
-            flag_match = re.match(r'flags.(\d+)\?([\w<>.]+)', self.type)
+            # The type may be a flag (FLAGS.IDX?REAL_TYPE)
+            # FLAGS can be any name, but it should have appeared previously.
+            flag_match = re.match(r'(\w+).(\d+)\?([\w<>.]+)', self.type)
             if flag_match:
-                self.is_flag = True
-                self.flag_index = int(flag_match.group(1))
+                self.flag = flag_match.group(1)
+                self.flag_index = int(flag_match.group(2))
                 # Update the type to match the exact type, not the "flagged" one
-                self.type = flag_match.group(2)
+                self.type = flag_match.group(3)
 
             # Then check if the type is a Vector<REAL_TYPE>
             vector_match = re.match(r'[Vv]ector<([\w\d.]+)>', self.type)
@@ -180,7 +183,7 @@ class TLArg:
         }.get(cls, "'Type{}'".format(cls))
         if self.is_vector:
             result = 'List[{}]'.format(result)
-        if self.is_flag and cls != 'date':
+        if self.flag and cls != 'date':
             result = 'Optional[{}]'.format(result)
 
         return result
@@ -200,23 +203,27 @@ class TLArg:
         if self.is_generic:
             real_type = '!{}'.format(real_type)
 
-        if self.is_flag:
-            real_type = 'flags.{}?{}'.format(self.flag_index, real_type)
+        if self.flag:
+            real_type = '{}.{}?{}'.format(self.flag, self.flag_index, real_type)
 
         return real_type
 
     def __str__(self):
+        name = self.orig_name()
         if self.generic_definition:
-            return '{{{}:{}}}'.format(self.name, self.real_type())
+            return '{{{}:{}}}'.format(name, self.real_type())
         else:
-            return '{}:{}'.format(self.name, self.real_type())
+            return '{}:{}'.format(name, self.real_type())
 
     def __repr__(self):
         return str(self).replace(':date', ':int').replace('?date', '?int')
 
+    def orig_name(self):
+        return self.name.replace('is_self', 'self').strip('_')
+
     def to_dict(self):
         return {
-            'name': self.name.replace('is_self', 'self'),
+            'name': self.orig_name(),
             'type': re.sub(r'\bdate$', 'int', self.real_type())
         }
 
@@ -244,5 +251,5 @@ class TLArg:
             self.cls[0].as_example(f, indent)
 
     def omit_example(self):
-        return (self.is_flag or self.can_be_inferred) \
+        return (self.flag or self.can_be_inferred) \
                and self.name in OMITTED_EXAMPLES
