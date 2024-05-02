@@ -288,7 +288,7 @@ class TelegramBaseClient(abc.ABC):
         # Determine what session object we have
         if isinstance(session, (str, pathlib.Path)):
             try:
-                session = SQLiteSession(str(session))
+                session = SQLiteSession(session)
             except ImportError:
                 import warnings
                 warnings.warn(
