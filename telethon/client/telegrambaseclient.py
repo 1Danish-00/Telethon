@@ -262,7 +262,8 @@ class TelegramBaseClient(abc.ABC):
             base_logger: typing.Union[str, logging.Logger] = None,
             receive_updates: bool = True,
             catch_up: bool = False,
-            entity_cache_limit: int = 5000
+            entity_cache_limit: int = 5000,
+            params: dict = None,
     ):
         if not api_id or not api_hash:
             raise ValueError(
@@ -394,7 +395,8 @@ class TelegramBaseClient(abc.ABC):
             system_lang_code=system_lang_code,
             lang_pack=lang_pack,  # "langPacks are for official apps only"
             query=None,
-            proxy=init_proxy
+            proxy=init_proxy,
+            params=params
         )
 
         # Remember flood-waited requests to avoid making them again
